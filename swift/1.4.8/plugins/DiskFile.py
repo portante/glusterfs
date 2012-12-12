@@ -242,13 +242,8 @@ class Gluster_DiskFile(DiskFile):
                 logging.error('Unable to delete dir %s' % os.path.join(self.datadir, self.obj))
             return
 
-        for fname in do_listdir(self.datadir):
-            if fname == self.obj:
-                try:
-                    do_unlink(os.path.join(self.datadir, fname))
-                except OSError, err:
-                    if err.errno != errno.ENOENT:
-                        raise
+        assert self.data_file == os.path.join(self.datadir, self.obj)
+        do_unlink(self.data_file)
 
         #Remove entire path for object.
         #remove_dir_path(self.obj_path, self.container_path)
