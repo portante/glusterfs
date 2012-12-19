@@ -219,16 +219,16 @@ def _update_list(path, cont_path, src_list, reg_file=True, object_count=0,
     # strip the prefix off, also stripping the leading and trailing slashes
     obj_path = path.replace(cont_path, '').strip(os.path.sep)
 
-    for i in src_list:
+    for obj_name in src_list:
         if obj_path:
-            obj_list.append(os.path.join(obj_path, i))
+            obj_list.append(os.path.join(obj_path, obj_name))
         else:
-            obj_list.append(i)
+            obj_list.append(obj_name)
 
         object_count += 1
 
         if reg_file:
-            bytes_used += os.path.getsize(path + '/' + i)
+            bytes_used += os.path.getsize(os.path.join(path, obj_name))
 
     return object_count, bytes_used
 

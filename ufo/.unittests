@@ -1,6 +1,9 @@
 #!/bin/bash
 
 cd test/unit
+export GLUSTER_UNIT_TEST_ENABLED=yes
 nosetests --exe --with-coverage --cover-package gluster --cover-erase $@
+saved_status=$?
 rm -f .coverage
-cd -
+unset GLUSTER_UNIT_TEST_ENABLED
+exit $saved_status
