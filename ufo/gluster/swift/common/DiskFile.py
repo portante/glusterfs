@@ -18,15 +18,14 @@ import errno
 from eventlet import tpool
 from tempfile import mkstemp
 from contextlib import contextmanager
-from swift.common.utils import normalize_timestamp, renamer
+from swift.common.utils import renamer
 from swift.common.exceptions import DiskFileNotExist
 from gluster.swift.common.utils import mkdirs, rmdirs, validate_object, \
      create_object_metadata,  do_open, do_close, do_unlink, do_chown, \
-     do_stat, do_listdir, read_metadata, write_metadata
-from gluster.swift.common.utils import X_CONTENT_TYPE, X_CONTENT_LENGTH, \
-     X_TIMESTAMP, X_PUT_TIMESTAMP, X_TYPE, X_ETAG, X_OBJECTS_COUNT, \
-     X_BYTES_USED, X_OBJECT_TYPE, FILE, DIR, MARKER_DIR, OBJECT, DIR_TYPE, \
-     FILE_TYPE, DEFAULT_UID, DEFAULT_GID
+     read_metadata, write_metadata
+from gluster.swift.common.utils import X_CONTENT_LENGTH, X_TYPE, \
+     X_OBJECT_TYPE, FILE, MARKER_DIR, OBJECT, DIR_TYPE, FILE_TYPE, \
+     DEFAULT_UID, DEFAULT_GID
 
 import logging
 from swift.obj.server import DiskFile
@@ -204,9 +203,9 @@ class Gluster_DiskFile(DiskFile):
         :param metadata: dictionary of metadata to be written
         :param extension: extension to be used when making the file
         """
-        # Our caller will use '.data' here; we just ignore it since we map the
-        # URL directly to the file system.
-        extension = ''
+        # We ignore the extension parameter here. Our caller will use '.data'
+        # here; we just ignore it since we map the URL directly to the file
+        # system.
 
         metadata = _adjust_metadata(metadata)
 
@@ -224,7 +223,6 @@ class Gluster_DiskFile(DiskFile):
             msg = 'File object exists as a directory: %s' % self.data_file
             raise AlreadyExistsAsDir(msg)
 
-        timestamp = normalize_timestamp(metadata[X_TIMESTAMP])
         write_metadata(self.tmppath, metadata)
         if X_CONTENT_LENGTH in metadata:
             self.drop_cache(fd, 0, int(metadata[X_CONTENT_LENGTH]))
@@ -243,7 +241,6 @@ class Gluster_DiskFile(DiskFile):
         self.metadata = metadata
         self.data_file = newpath
         self.filter_metadata()
-        return
 
     def unlinkold(self, timestamp):
         """
