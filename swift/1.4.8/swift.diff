@@ -438,7 +438,7 @@ index 8a18cfd..93943a3 100644
          self.logger.txn_id = req.headers.get('x-trans-id', None)
          if not check_utf8(req.path_info):
 diff --git a/swift/obj/server.py b/swift/obj/server.py
-index 9cca16b..a45daff 100644
+index 9cca16b..8fabd26 100644
 --- a/swift/obj/server.py
 +++ b/swift/obj/server.py
 @@ -1,4 +1,5 @@
@@ -483,7 +483,15 @@ index 9cca16b..a45daff 100644
  DATADIR = 'objects'
  ASYNCDIR = 'async_pending'
  PICKLE_PROTOCOL = 2
-@@ -339,6 +348,9 @@ class DiskFile(object):
+@@ -171,6 +180,7 @@ class DiskFile(object):
+                             read - dropped_cache)
+                         dropped_cache = read
+                     yield chunk
++                    sleep()
+                 else:
+                     self.read_to_eof = True
+                     self.drop_cache(self.fp.fileno(), dropped_cache,
+@@ -339,6 +349,9 @@ class DiskFile(object):
                  raise
          raise DiskFileNotExist('Data File does not exist.')
  
@@ -493,7 +501,7 @@ index 9cca16b..a45daff 100644
  
  class ObjectController(object):
      """Implements the WSGI application for the Swift Object Server."""
-@@ -377,6 +389,17 @@ class ObjectController(object):
+@@ -377,6 +390,17 @@ class ObjectController(object):
              'expiring_objects'
          self.expiring_objects_container_divisor = \
              int(conf.get('expiring_objects_container_divisor') or 86400)
@@ -511,7 +519,7 @@ index 9cca16b..a45daff 100644
  
      def async_update(self, op, account, container, obj, host, partition,
                       contdevice, headers_out, objdevice):
-@@ -493,7 +516,7 @@ class ObjectController(object):
+@@ -493,7 +517,7 @@ class ObjectController(object):
                                    content_type='text/plain')
          if self.mount_check and not check_mount(self.devices, device):
              return Response(status='507 %s is not mounted' % device)
@@ -520,7 +528,7 @@ index 9cca16b..a45daff 100644
                          obj, self.logger, disk_chunk_size=self.disk_chunk_size)
  
          if 'X-Delete-At' in file.metadata and \
-@@ -548,7 +571,7 @@ class ObjectController(object):
+@@ -548,7 +572,7 @@ class ObjectController(object):
          if new_delete_at and new_delete_at < time.time():
              return HTTPBadRequest(body='X-Delete-At in past', request=request,
                                    content_type='text/plain')
@@ -529,7 +537,15 @@ index 9cca16b..a45daff 100644
                          obj, self.logger, disk_chunk_size=self.disk_chunk_size)
          orig_timestamp = file.metadata.get('X-Timestamp')
          upload_expiration = time.time() + self.max_upload_time
-@@ -580,12 +603,29 @@ class ObjectController(object):
+@@ -572,6 +596,7 @@ class ObjectController(object):
+                     tpool.execute(os.fdatasync, fd)
+                     drop_buffer_cache(fd, last_sync, upload_size - last_sync)
+                     last_sync = upload_size
++                sleep()
+ 
+             if 'content-length' in request.headers and \
+                     int(request.headers['content-length']) != upload_size:
+@@ -580,12 +605,29 @@ class ObjectController(object):
              if 'etag' in request.headers and \
                              request.headers['etag'].lower() != etag:
                  return HTTPUnprocessableEntity(request=request)
@@ -565,7 +581,7 @@ index 9cca16b..a45daff 100644
              metadata.update(val for val in request.headers.iteritems()
                      if val[0].lower().startswith('x-object-meta-') and
                      len(val[0]) > 14)
-@@ -612,7 +652,7 @@ class ObjectController(object):
+@@ -612,7 +654,7 @@ class ObjectController(object):
                   'x-timestamp': file.metadata['X-Timestamp'],
                   'x-etag': file.metadata['ETag'],
                   'x-trans-id': request.headers.get('x-trans-id', '-')},
@@ -574,7 +590,7 @@ index 9cca16b..a45daff 100644
          resp = HTTPCreated(request=request, etag=etag)
          return resp
  
-@@ -626,9 +666,9 @@ class ObjectController(object):
+@@ -626,9 +668,9 @@ class ObjectController(object):
                          content_type='text/plain')
          if self.mount_check and not check_mount(self.devices, device):
              return Response(status='507 %s is not mounted' % device)
@@ -587,7 +603,7 @@ index 9cca16b..a45daff 100644
          if file.is_deleted() or ('X-Delete-At' in file.metadata and
                  int(file.metadata['X-Delete-At']) <= time.time()):
              if request.headers.get('if-match') == '*':
-@@ -702,7 +742,7 @@ class ObjectController(object):
+@@ -702,7 +744,7 @@ class ObjectController(object):
              return resp
          if self.mount_check and not check_mount(self.devices, device):
              return Response(status='507 %s is not mounted' % device)
@@ -596,7 +612,7 @@ index 9cca16b..a45daff 100644
                          obj, self.logger, disk_chunk_size=self.disk_chunk_size)
          if file.is_deleted() or ('X-Delete-At' in file.metadata and
                  int(file.metadata['X-Delete-At']) <= time.time()):
-@@ -744,7 +784,7 @@ class ObjectController(object):
+@@ -744,7 +786,7 @@ class ObjectController(object):
          if self.mount_check and not check_mount(self.devices, device):
              return Response(status='507 %s is not mounted' % device)
          response_class = HTTPNoContent
@@ -605,7 +621,7 @@ index 9cca16b..a45daff 100644
                          obj, self.logger, disk_chunk_size=self.disk_chunk_size)
          if 'x-if-delete-at' in request.headers and \
                  int(request.headers['x-if-delete-at']) != \
-@@ -797,9 +837,18 @@ class ObjectController(object):
+@@ -797,9 +839,18 @@ class ObjectController(object):
              raise hashes
          return Response(body=pickle.dumps(hashes))
  
