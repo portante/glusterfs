@@ -19,6 +19,7 @@ import errno
 from hashlib import md5
 from swift.common.utils import normalize_timestamp
 from xattr import setxattr, removexattr, getxattr, removexattr
+from eventlet import sleep
 import cPickle as pickle
 
 X_CONTENT_TYPE = 'Content-Type'
@@ -429,17 +430,20 @@ def _update_list(path, const_path, src_list, reg_file=True, object_count=0,
 
         if reg_file:
             bytes_used += os.path.getsize(path + '/' + i)
+            sleep()
 
     return object_count, bytes_used
 
 def update_list(path, const_path, dirs=[], files=[], object_count=0,
                 bytes_used=0, obj_list=[]):
-    object_count, bytes_used = _update_list (path, const_path, files, True,
-                                             object_count, bytes_used,
-                                             obj_list)
-    object_count, bytes_used = _update_list (path, const_path, dirs, False,
-                                             object_count, bytes_used,
-                                             obj_list)
+    if files:
+        object_count, bytes_used = _update_list (path, const_path, files, True,
+                                                 object_count, bytes_used,
+                                                 obj_list)
+    if dirs:
+        object_count, bytes_used = _update_list (path, const_path, dirs, False,
+                                                 object_count, bytes_used,
+                                                 obj_list)
     return object_count, bytes_used
 
 def get_container_details_from_fs(cont_path, const_path,
@@ -459,6 +463,7 @@ def get_container_details_from_fs(cont_path, const_path,
                                                    obj_list)
 
             dir_list.append(path + ':' + str(do_stat(path).st_mtime))
+            sleep()
 
     if memcache:
         memcache.set(strip_obj_storage_path(cont_path), obj_list)
