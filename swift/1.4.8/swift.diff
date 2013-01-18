@@ -250,6 +250,73 @@ index 47edce8..03701ce 100644
 +        return swift_conf.get('DEFAULT', 'Enable_plugin', 'no') in TRUE_VALUES
 +    except NoOptionError, NoSectionError:
 +        return False
+diff --git a/swift/common/wsgi.py b/swift/common/wsgi.py
+index ddfd42b..1a644dd 100644
+--- a/swift/common/wsgi.py
++++ b/swift/common/wsgi.py
+@@ -88,6 +88,22 @@ def get_socket(conf, default_port=8080):
+     return sock
+ 
+ 
++class RestrictedGreenPool(GreenPool):
++    """
++    Works the same as GreenPool, but if the size is specified as one, then the
++    spawn_n() method will invoke waitall() before returning to prevent the
++    caller from doing any other work (like calling accept()).
++    """
++    def __init__(self, size=1024):
++        super(RestrictedGreenPool, self).__init__(size=size)
++        self._rgp_do_wait = (size == 1)
++
++    def spawn_n(self, *args, **kwargs):
++        super(RestrictedGreenPool, self).spawn_n(*args, **kwargs)
++        if self._rgp_do_wait:
++            self.waitall()
++
++
+ # TODO: pull pieces of this out to test
+ def run_wsgi(conf_file, app_section, *args, **kwargs):
+     """
+@@ -124,7 +140,7 @@ def run_wsgi(conf_file, app_section, *args, **kwargs):
+     # redirect errors to logger and close stdio
+     capture_stdio(logger)
+ 
+-    def run_server():
++    def run_server(max_clients):
+         wsgi.HttpProtocol.default_request_version = "HTTP/1.0"
+         # Turn off logging requests by the underlying WSGI software.
+         wsgi.HttpProtocol.log_request = lambda *a: None
+@@ -137,7 +153,7 @@ def run_wsgi(conf_file, app_section, *args, **kwargs):
+         monkey_patch_mimetools()
+         app = loadapp('config:%s' % conf_file,
+                       global_conf={'log_name': log_name})
+-        pool = GreenPool(size=1024)
++        pool = RestrictedGreenPool(size=max_clients)
+         try:
+             wsgi.server(sock, app, NullLogger(), custom_pool=pool)
+         except socket.error, err:
+@@ -145,10 +161,11 @@ def run_wsgi(conf_file, app_section, *args, **kwargs):
+                 raise
+         pool.waitall()
+ 
++    max_clients = int(conf.get('max_clients', '1024'))
+     worker_count = int(conf.get('workers', '1'))
+     # Useful for profiling [no forks].
+     if worker_count == 0:
+-        run_server()
++        run_server(max_clients)
+         return
+ 
+     def kill_children(*args):
+@@ -174,7 +191,7 @@ def run_wsgi(conf_file, app_section, *args, **kwargs):
+             if pid == 0:
+                 signal.signal(signal.SIGHUP, signal.SIG_DFL)
+                 signal.signal(signal.SIGTERM, signal.SIG_DFL)
+-                run_server()
++                run_server(max_clients)
+                 logger.notice('Child %d exiting normally' % os.getpid())
+                 return
+             else:
 diff --git a/swift/container/server.py b/swift/container/server.py
 index 8a18cfd..6edc717 100644
 --- a/swift/container/server.py
