@@ -251,7 +251,7 @@ index 47edce8..03701ce 100644
 +    except NoOptionError, NoSectionError:
 +        return False
 diff --git a/swift/container/server.py b/swift/container/server.py
-index 8a18cfd..93943a3 100644
+index 8a18cfd..6edc717 100644
 --- a/swift/container/server.py
 +++ b/swift/container/server.py
 @@ -1,4 +1,5 @@
@@ -300,7 +300,21 @@ index 8a18cfd..93943a3 100644
          hsh = hash_path(account, container)
          db_dir = storage_directory(DATADIR, part, hsh)
          db_path = os.path.join(self.root, drive, db_dir, hsh + '.db')
-@@ -211,10 +222,18 @@ class ContainerController(object):
+@@ -164,9 +175,10 @@ class ContainerController(object):
+             broker.delete_db(req.headers['X-Timestamp'])
+             if not broker.is_deleted():
+                 return HTTPConflict(request=req)
+-            resp = self.account_update(req, account, container, broker)
+-            if resp:
+-                return resp
++            if not self.fs_object:
++                resp = self.account_update(req, account, container, broker)
++                if resp:
++                    return resp
+             if existed:
+                 return HTTPNoContent(request=req)
+             return HTTPNotFound()
+@@ -211,10 +223,18 @@ class ContainerController(object):
                  if broker.is_deleted():
                      return HTTPConflict(request=req)
              metadata = {}
@@ -323,15 +337,22 @@ index 8a18cfd..93943a3 100644
              if metadata:
                  if 'X-Container-Sync-To' in metadata:
                      if 'X-Container-Sync-To' not in broker.metadata or \
-@@ -222,6 +241,7 @@ class ContainerController(object):
+@@ -222,9 +242,11 @@ class ContainerController(object):
                              broker.metadata['X-Container-Sync-To'][0]:
                          broker.set_x_container_sync_points(-1, -1)
                  broker.update_metadata(metadata)
+-            resp = self.account_update(req, account, container, broker)
+-            if resp:
+-                return resp
 +
-             resp = self.account_update(req, account, container, broker)
-             if resp:
-                 return resp
-@@ -245,6 +265,11 @@ class ContainerController(object):
++            if not self.fs_object:
++                resp = self.account_update(req, account, container, broker)
++                if resp:
++                    return resp
+             if created:
+                 return HTTPCreated(request=req)
+             else:
+@@ -245,6 +267,11 @@ class ContainerController(object):
          broker.stale_reads_ok = True
          if broker.is_deleted():
              return HTTPNotFound(request=req)
@@ -343,7 +364,7 @@ index 8a18cfd..93943a3 100644
          info = broker.get_info()
          headers = {
              'X-Container-Object-Count': info['object_count'],
-@@ -252,10 +277,17 @@ class ContainerController(object):
+@@ -252,10 +279,17 @@ class ContainerController(object):
              'X-Timestamp': info['created_at'],
              'X-PUT-Timestamp': info['put_timestamp'],
          }
@@ -365,7 +386,7 @@ index 8a18cfd..93943a3 100644
          return HTTPNoContent(request=req, headers=headers)
  
      def GET(self, req):
-@@ -268,6 +300,7 @@ class ContainerController(object):
+@@ -268,6 +302,7 @@ class ContainerController(object):
                                  request=req)
          if self.mount_check and not check_mount(self.root, drive):
              return Response(status='507 %s is not mounted' % drive)
@@ -373,7 +394,7 @@ index 8a18cfd..93943a3 100644
          broker = self._get_container_broker(drive, part, account, container)
          broker.pending_timeout = 0.1
          broker.stale_reads_ok = True
-@@ -280,10 +313,17 @@ class ContainerController(object):
+@@ -280,10 +315,17 @@ class ContainerController(object):
              'X-Timestamp': info['created_at'],
              'X-PUT-Timestamp': info['put_timestamp'],
          }
@@ -395,7 +416,7 @@ index 8a18cfd..93943a3 100644
          try:
              path = get_param(req, 'path')
              prefix = get_param(req, 'prefix')
-@@ -414,10 +454,17 @@ class ContainerController(object):
+@@ -414,10 +456,17 @@ class ContainerController(object):
              return HTTPNotFound(request=req)
          timestamp = normalize_timestamp(req.headers['x-timestamp'])
          metadata = {}
@@ -417,7 +438,7 @@ index 8a18cfd..93943a3 100644
          if metadata:
              if 'X-Container-Sync-To' in metadata:
                  if 'X-Container-Sync-To' not in broker.metadata or \
-@@ -427,8 +474,19 @@ class ContainerController(object):
+@@ -427,8 +476,19 @@ class ContainerController(object):
              broker.update_metadata(metadata)
          return HTTPNoContent(request=req)
  
@@ -438,7 +459,7 @@ index 8a18cfd..93943a3 100644
          self.logger.txn_id = req.headers.get('x-trans-id', None)
          if not check_utf8(req.path_info):
 diff --git a/swift/obj/server.py b/swift/obj/server.py
-index 9cca16b..8fabd26 100644
+index 9cca16b..b3986d9 100644
 --- a/swift/obj/server.py
 +++ b/swift/obj/server.py
 @@ -1,4 +1,5 @@
@@ -581,12 +602,23 @@ index 9cca16b..8fabd26 100644
              metadata.update(val for val in request.headers.iteritems()
                      if val[0].lower().startswith('x-object-meta-') and
                      len(val[0]) > 14)
+@@ -603,8 +645,8 @@ class ObjectController(object):
+                         container, obj, request.headers, device)
+             file.put(fd, tmppath, metadata)
+         file.unlinkold(metadata['X-Timestamp'])
+-        if not orig_timestamp or \
+-                orig_timestamp < request.headers['x-timestamp']:
++        if not self.fs_object and (not orig_timestamp or \
++                orig_timestamp < request.headers['x-timestamp']):
+             self.container_update('PUT', account, container, obj,
+                 request.headers,
+                 {'x-size': file.metadata['Content-Length'],
 @@ -612,7 +654,7 @@ class ObjectController(object):
                   'x-timestamp': file.metadata['X-Timestamp'],
                   'x-etag': file.metadata['ETag'],
                   'x-trans-id': request.headers.get('x-trans-id', '-')},
 -                device)
-+                (self.fs_object and account) or device)
++                account or device)
          resp = HTTPCreated(request=request, etag=etag)
          return resp
  
@@ -621,6 +653,17 @@ index 9cca16b..8fabd26 100644
                          obj, self.logger, disk_chunk_size=self.disk_chunk_size)
          if 'x-if-delete-at' in request.headers and \
                  int(request.headers['x-if-delete-at']) != \
+@@ -764,8 +806,8 @@ class ObjectController(object):
+                                       container, obj, request.headers, device)
+             file.put(fd, tmppath, metadata, extension='.ts')
+         file.unlinkold(metadata['X-Timestamp'])
+-        if not orig_timestamp or \
+-                orig_timestamp < request.headers['x-timestamp']:
++        if not self.fs_object and (not orig_timestamp or \
++                orig_timestamp < request.headers['x-timestamp']):
+             self.container_update('DELETE', account, container, obj,
+                 request.headers, {'x-timestamp': metadata['X-Timestamp'],
+                 'x-trans-id': request.headers.get('x-trans-id', '-')},
 @@ -797,9 +839,18 @@ class ObjectController(object):
              raise hashes
          return Response(body=pickle.dumps(hashes))
