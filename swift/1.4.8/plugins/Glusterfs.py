@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
-import os, fcntl, time
+import os, fcntl, time, errno
 from ConfigParser import ConfigParser
 from swift.common.utils import TRUE_VALUES
 from hashlib import md5
@@ -37,11 +37,14 @@ class Glusterfs(object):
             if os.path.ismount(os.path.join(mount_path)):
                 return True
             time.sleep(2)
+        logging.error('Mount failed (after timeout) %s: %s' % (self.name, mnt_cmd))
         return False
 
     def mount(self, account):
         mount_path = os.path.join(self.mount_path, account)
         export = self.get_export_from_account_id(account)
+        if not export:
+            return False
 
         pid_dir  = "/var/lib/glusterd/vols/%s/run/" %export
         pid_file = os.path.join(pid_dir, 'swift.pid');
@@ -53,17 +56,16 @@ class Glusterfs(object):
         with os.fdopen(fd, 'r+b') as f:
             try:
                 fcntl.lockf(f, fcntl.LOCK_EX|fcntl.LOCK_NB)
-            except:
-                ex = sys.exc_info()[1]
-                if isinstance(ex, IOError) and ex.errno in (EACCES, EAGAIN):
-                # This means that some other process is mounting the
-                # filesystem, so wait for the mount process to complete
+            except IOError as ex:
+                if ex.errno in (errno.EACCES, errno.EAGAIN):
+                    # This means that some other process is mounting the
+                    # filesystem, so wait for the mount process to complete
                     return self.busy_wait(mount_path)
 
             mnt_cmd = 'mount -t glusterfs %s:%s %s' % (self.mount_ip, export, \
                                                        mount_path)
             if os.system(mnt_cmd) or not self.busy_wait(mount_path):
-                raise Exception('Mount failed %s: %s' % (self.name, mnt_cmd))
+                logging.error('Mount failed %s: %s' % (self.name, mnt_cmd))
                 return False
         return True
 
@@ -78,7 +80,6 @@ class Glusterfs(object):
 
         if os.system(cmnd + ' >> /dev/null'):
             raise Exception('Getting volume failed %s', self.name)
-            return export_list
 
         fp = os.popen(cmnd)
         while True:
@@ -99,7 +100,6 @@ class Glusterfs(object):
         if os.system(cmnd + ' >> /dev/null'):
             raise Exception('Getting volume info failed %s, make sure to have \
                             passwordless ssh on %s', self.name, self.mount_ip)
-            return export_list
 
         fp = os.popen(cmnd)
         while True:
@@ -120,12 +120,11 @@ class Glusterfs(object):
 
     def get_export_from_account_id(self, account):
         if not account:
-            print 'account is none, returning'
-            raise AttributeError
+            raise ValueError("Account is None")
 
         for export in self.get_export_list():
             if account == 'AUTH_' + export:
                 return export
 
-        raise Exception('No export found %s %s' % (account, self.name))
+        logging.error('No export found %s %s' % (account, self.name))
         return None
