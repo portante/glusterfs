@@ -17,7 +17,8 @@ import logging
 import os
 import errno
 from hashlib import md5
-from swift.common.utils import normalize_timestamp
+from ConfigParser import ConfigParser
+from swift.common.utils import normalize_timestamp, TRUE_VALUES
 from xattr import setxattr, removexattr, getxattr, removexattr
 from eventlet import sleep
 import cPickle as pickle
@@ -49,6 +50,9 @@ DEFAULT_GID = -1
 PICKLE_PROTOCOL = 2
 CHUNK_SIZE = 65536
 
+_fs_conf = ConfigParser()
+_fs_conf.read(os.path.join('/etc/swift', 'fs.conf'))
+_do_getsize = _fs_conf.get('DEFAULT', 'accurate_size_in_listing', "no") in TRUE_VALUES
 
 def mkdirs(path):
     """
@@ -428,7 +432,7 @@ def _update_list(path, const_path, src_list, reg_file=True, object_count=0,
 
         object_count += 1
 
-        if reg_file:
+        if reg_file and _do_getsize:
             bytes_used += os.path.getsize(path + '/' + i)
             sleep()
 
