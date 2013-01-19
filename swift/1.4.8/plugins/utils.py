@@ -530,44 +530,28 @@ def get_account_metadata(acc_path):
                 X_CONTAINER_COUNT: container_count}
     return metadata
 
-def restore_object(obj_path, metadata):
-    meta = read_metadata(obj_path)
-    if meta:
-        meta.update(metadata)
-        write_metadata(obj_path, meta)
+def restore_metadata(path, metadata):
+    meta_orig = read_metadata(path)
+    if meta_orig:
+        meta_new = meta_orig.copy()
+        meta_new.update(metadata)
     else:
-        write_metadata(obj_path, metadata)
-
-def restore_container(cont_path, metadata):
-    meta = read_metadata(cont_path)
-    if meta:
-        meta.update(metadata)
-        write_metadata(cont_path, meta)
-    else:
-        write_metadata(cont_path, metadata)
-
-def restore_account(acc_path, metadata):
-    meta = read_metadata(acc_path)
-    if meta:
-        meta.update(metadata)
-        write_metadata(acc_path, meta)
-    else:
-        write_metadata(acc_path, metadata)
+        meta_new = metadata
+    if meta_orig != meta_new:
+        write_metadata(path, meta_new)
+    return meta_new
 
 def create_object_metadata(obj_path):
-    meta = get_object_metadata(obj_path)
-    restore_object(obj_path, meta)
-    return meta
+    metadata = get_object_metadata(obj_path)
+    return restore_metadata(obj_path, metadata)
 
 def create_container_metadata(cont_path):
-    meta = get_container_metadata(cont_path)
-    restore_container(cont_path, meta)
-    return meta
+    metadata = get_container_metadata(cont_path)
+    return restore_metadata(cont_path, metadata)
 
 def create_account_metadata(acc_path):
-    meta = get_account_metadata(acc_path)
-    restore_account(acc_path, meta)
-    return meta
+    metadata = get_account_metadata(acc_path)
+    return restore_metadata(acc_path, metadata)
 
 def check_account_exists(account, fs_object):
     if account not in get_account_list(fs_object):
