@@ -9,11 +9,14 @@
 # For more information refer #
 # http://fedoraproject.org/wiki/How_to_create_an_RPM_package #
 ############################################################################################################
+%if ! (0%{?fedora} > 12 || 0%{?rhel} > 5)
+%{!?python_sitelib: %global python_sitelib %(%{__python} -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())")}
+%endif
 
 %define _confdir     /etc/swift
 %define _swiftdir    /usr/lib/python2.6/site-packages/swift
 %define _ufo_version 1.0
-%define _ufo_release 3
+%define _ufo_release 5.pdq.0{?dist}
 
 Summary  : GlusterFS Unified File and Object Storage.
 Name     : gluster-swift-plugin
