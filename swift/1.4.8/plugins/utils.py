@@ -18,10 +18,10 @@ import os
 import errno
 import xattr
 from hashlib import md5
-from ConfigParser import ConfigParser
 from swift.common.utils import normalize_timestamp, TRUE_VALUES
 from eventlet import sleep
 import cPickle as pickle
+from ConfigParser import ConfigParser, NoSectionError, NoOptionError
 
 X_CONTENT_TYPE = 'Content-Type'
 X_CONTENT_LENGTH = 'Content-Length'
@@ -37,6 +37,7 @@ DIR_TYPE = 'application/directory'
 ACCOUNT = 'Account'
 MOUNT_PATH = '/mnt/gluster-object'
 METADATA_KEY = 'user.swift.metadata'
+MAX_XATTR_SIZE = 254
 CONTAINER = 'container'
 DIR = 'dir'
 MARKER_DIR = 'marker_dir'
@@ -181,43 +182,72 @@ def do_rename(old_path, new_path):
 
 def read_metadata(path):
     """
-    Helper function to read the pickled metadata from a File/Directory .
+    Helper function to read the pickled metadata from a File/Directory.
 
     :param path: File/Directory to read metadata from.
 
     :returns: dictionary of metadata
     """
-    metadata = ''
+    metadata = None
+    metadata_s = ''
     key = 0
-    while True:
+    while metadata is None:
         try:
-            metadata += xattr.get(path, '%s%s' % (METADATA_KEY, (key or '')))
+            metadata_s += xattr.get(path, '%s%s' % (METADATA_KEY, (key or '')))
         except IOError as err:
-            if err.errno != errno.ENODATA:
-                logging.exception("xattr.get failed on %s key %s err: %s", path, key, str(err))
-            break
-        key += 1
-    if metadata:
-        return pickle.loads(metadata)
-    else:
-        return {}
+            if err.errno == errno.ENODATA:
+                if key > 0:
+                    # No errors reading the xattr keys, but since we have not
+                    # been able to find enough chunks to get a successful
+                    # unpickle operation, we consider the metadata lost, and
+                    # drop the existing data so that the internal state can be
+                    # recreated.
+                    clean_metadata(path)
+                # We either could not find any metadata key, or we could find
+                # some keys, but were not successful in performing the
+                # unpickling (missing keys perhaps)? Either way, just report
+                # to the caller we have no metadata.
+                metadata = {}
+            else:
+                logging.exception("xattr.get failed on %s key %s err: %s",
+                                  path, key, str(err))
+                # Note that we don't touch the keys on errors fetching the
+                # data since it could be a transient state.
+                raise
+        else:
+            try:
+                # If this key provides all or the remaining part of the pickle
+                # data, we don't need to keep searching for more keys. This
+                # means if we only need to store data in N xattr key/value
+                # pair, we only need to invoke xattr get N times. With large
+                # keys sizes we are shooting for N = 1.
+                metadata = pickle.loads(metadata_s)
+                assert isinstance(metadata, dict)
+            except EOFError, pickle.UnpicklingError:
+                # We still are not able recognize this existing data collected
+                # as a pickled object. Make sure we loop around to try to get
+                # more from another xattr key.
+                metadata = None
+                key += 1
+    return metadata
 
 def write_metadata(path, metadata):
     """
     Helper function to write pickled metadata for a File/Directory.
 
     :param path: File/Directory path to write the metadata
-    :param metadata: metadata to write
+    :param metadata: dictionary of metadata write
     """
+    assert isinstance(metadata, dict)
     metastr = pickle.dumps(metadata, PICKLE_PROTOCOL)
     key = 0
     while metastr:
         try:
-            xattr.set(path, '%s%s' % (METADATA_KEY, key or ''), metastr[:254])
+            xattr.set(path, '%s%s' % (METADATA_KEY, key or ''), metastr[:MAX_XATTR_SIZE])
         except IOError as err:
             logging.exception("xattr.set failed on %s key %s err: %s", path, key, str(err))
             raise
-        metastr = metastr[254:]
+        metastr = metastr[MAX_XATTR_SIZE:]
         key += 1
 
 def clean_metadata(path):
@@ -228,6 +258,7 @@ def clean_metadata(path):
         except IOError as err:
             if err.errno == errno.ENODATA:
                 break
+            raise
         key += 1
 
 def dir_empty(path):
@@ -265,8 +296,8 @@ def check_user_xattr(path):
         raise
     try:
         xattr.remove(path, 'user.test.key1')
-    except Exception, err:
-        logging.exception("xattr.remove failed on %s err: %s", path, str(err))
+    except IOError as err:
+        logging.exception("check_user_xattr: remove failed on %s err: %s", path, str(err))
         #Remove xattr may fail in case of concurrent remove.
     return True
 
