@@ -179,67 +179,6 @@ def do_rename(old_path, new_path):
         raise
     return True
 
-def do_setxattr(path, key, value):
-    fd = None
-    if not os.path.isdir(path):
-        fd = do_open(path, 'rb')
-    else:
-        fd = path
-    if fd or os.path.isdir(path):
-        try:
-            xattr.set(fd, key, value)
-        except Exception, err:
-            logging.exception("xattr.set failed on %s key %s err: %s", path, key, str(err))
-            raise
-        finally:
-            if fd and not os.path.isdir(path):
-                do_close(fd)
-    else:
-        logging.error("Open failed path %s", path)
-        return False
-    return True
-
-def do_getxattr(path, key, log = True):
-    fd = None
-    if not os.path.isdir(path):
-        fd = do_open(path, 'rb')
-    else:
-        fd = path
-    if fd or os.path.isdir(path):
-        try:
-            value = xattr.get(fd, key)
-        except Exception, err:
-            if log:
-                logging.exception("xattr.get failed on %s key %s err: %s", path, key, str(err))
-            raise
-        finally:
-            if fd and not os.path.isdir(path):
-                do_close(fd)
-    else:
-        logging.error("Open failed path %s", path)
-        return False
-    return value
-
-def do_removexattr(path, key):
-    fd = None
-    if not os.path.isdir(path):
-        fd = do_open(path, 'rb')
-    else:
-        fd = path
-    if fd or os.path.isdir(path):
-        try:
-            xattr.remove(fd, key)
-        except Exception, err:
-            logging.exception("xattr.remove failed on %s key %s err: %s", path, key, str(err))
-            raise
-        finally:
-            if fd and not os.path.isdir(path):
-                do_close(fd)
-    else:
-        logging.error("Open failed path %s", path)
-        return False
-    return True
-
 def read_metadata(path):
     """
     Helper function to read the pickled metadata from a File/Directory .
@@ -252,16 +191,16 @@ def read_metadata(path):
     key = 0
     while True:
         try:
-            metadata += do_getxattr(path, '%s%s' % (METADATA_KEY, (key or '')),
-                            log = False)
-        except Exception:
+            metadata += xattr.get(path, '%s%s' % (METADATA_KEY, (key or '')))
+        except IOError as err:
+            if err.errno != errno.ENODATA:
+                logging.exception("xattr.get failed on %s key %s err: %s", path, key, str(err))
             break
         key += 1
     if metadata:
         return pickle.loads(metadata)
     else:
         return {}
-
 
 def write_metadata(path, metadata):
     """
@@ -273,17 +212,23 @@ def write_metadata(path, metadata):
     metastr = pickle.dumps(metadata, PICKLE_PROTOCOL)
     key = 0
     while metastr:
-        do_setxattr(path, '%s%s' % (METADATA_KEY, key or ''), metastr[:254])
+        try:
+            xattr.set(path, '%s%s' % (METADATA_KEY, key or ''), metastr[:254])
+        except IOError as err:
+            logging.exception("xattr.set failed on %s key %s err: %s", path, key, str(err))
+            raise
         metastr = metastr[254:]
         key += 1
 
 def clean_metadata(path):
     key = 0
     while True:
-        value = do_getxattr(path, '%s%s' % (METADATA_KEY, (key or '')))
-        do_removexattr(path, '%s%s' % (METADATA_KEY, (key or '')))
+        try:
+            xattr.remove(path, '%s%s' % (METADATA_KEY, (key or '')))
+        except IOError as err:
+            if err.errno == errno.ENODATA:
+                break
         key += 1
-
 
 def dir_empty(path):
     """
@@ -305,7 +250,6 @@ def dir_empty(path):
         if not os.path.exists(path):
             return True
 
-
 def get_device_from_account(account):
     if account.startswith(RESELLER_PREFIX):
         device = account.replace(RESELLER_PREFIX, '', 1)
@@ -314,14 +258,17 @@ def get_device_from_account(account):
 def check_user_xattr(path):
     if not os.path.exists(path):
         return False
-    do_setxattr(path, 'user.test.key1', 'value1')
+    try:
+        xattr.set(path, 'user.test.key1', 'value1')
+    except IOError as err:
+        logging.exception("check_user_xattr: set failed on %s err: %s", path, str(err))
+        raise
     try:
         xattr.remove(path, 'user.test.key1')
     except Exception, err:
         logging.exception("xattr.remove failed on %s err: %s", path, str(err))
         #Remove xattr may fail in case of concurrent remove.
     return True
-
 
 def _check_valid_account(account, fs_object):
     mount_path = getattr(fs_object, 'mount_path', MOUNT_PATH)
@@ -501,7 +448,6 @@ def get_etag(path):
 
     return etag
 
-
 def get_object_metadata(obj_path):
     """
     Return metadata of object.
@@ -592,7 +538,6 @@ def create_account_metadata(acc_path):
     restore_account(acc_path, meta)
     return meta
 
-
 def check_account_exists(account, fs_object):
     if account not in get_account_list(fs_object):
         logging.error('Account not exists %s' % account)
@@ -606,7 +551,5 @@ def get_account_list(fs_object):
         account_list = fs_object.get_export_list()
     return account_list
 
-
 def get_account_id(account):
     return RESELLER_PREFIX + md5(account + HASH_PATH_SUFFIX).hexdigest()
-
