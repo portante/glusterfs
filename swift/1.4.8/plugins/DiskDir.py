@@ -247,7 +247,7 @@ class DiskDir(DiskCommon):
             rmdirs(self.datadir)
 
     def list_objects_iter(self, limit, marker, end_marker,
-                          prefix, delimiter, path):
+                          prefix, delimiter, path, details):
         """
         Returns tuple of name, created_at, size, content_type, etag.
         """
@@ -293,14 +293,15 @@ class DiskDir(DiskCommon):
             for obj in objects:
                 list_item = []
                 list_item.append(obj)
-                metadata = read_metadata(self.datadir + '/' + obj)
-                if not metadata or not validate_object(metadata):
-                    metadata = create_object_metadata(self.datadir + '/' + obj)
-                if metadata:
-                    list_item.append(metadata[X_TIMESTAMP])
-                    list_item.append(int(metadata[X_CONTENT_LENGTH]))
-                    list_item.append(metadata[X_CONTENT_TYPE])
-                    list_item.append(metadata[X_ETAG])
+                if details:
+                    metadata = read_metadata(self.datadir + '/' + obj)
+                    if not metadata or not validate_object(metadata):
+                        metadata = create_object_metadata(self.datadir + '/' + obj)
+                    if metadata:
+                        list_item.append(metadata[X_TIMESTAMP])
+                        list_item.append(int(metadata[X_CONTENT_LENGTH]))
+                        list_item.append(metadata[X_CONTENT_TYPE])
+                        list_item.append(metadata[X_ETAG])
                 container_list.append(list_item)
 
         return container_list
@@ -406,7 +407,7 @@ class DiskAccount(DiskDir):
             self.metadata = create_account_metadata(self.datadir)
 
     def list_containers_iter(self, limit, marker, end_marker,
-                             prefix, delimiter):
+                             prefix, delimiter, details):
         """
         Return tuple of name, object_count, bytes_used, 0(is_subdir).
         Used by account server.
@@ -445,16 +446,16 @@ class DiskAccount(DiskDir):
         if containers:
             for cont in containers:
                 list_item = []
-                metadata = None
                 list_item.append(cont)
-                metadata = read_metadata(self.datadir + '/' + cont)
-                if not metadata or not validate_container(metadata):
-                    metadata = create_container_metadata(self.datadir + '/' + cont)
+                if details:
+                    metadata = read_metadata(self.datadir + '/' + cont)
+                    if not metadata or not validate_container(metadata):
+                        metadata = create_container_metadata(self.datadir + '/' + cont)
 
-                if metadata:
-                    list_item.append(metadata[X_OBJECTS_COUNT])
-                    list_item.append(metadata[X_BYTES_USED])
-                    list_item.append(0)
+                    if metadata:
+                        list_item.append(metadata[X_OBJECTS_COUNT])
+                        list_item.append(metadata[X_BYTES_USED])
+                        list_item.append(0)
                 account_list.append(list_item)
 
         return account_list

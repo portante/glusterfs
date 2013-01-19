@@ -18,7 +18,7 @@ index d195d34..b5b5ca2 100644
          },
      )
 diff --git a/swift/account/server.py b/swift/account/server.py
-index 800b3c0..6c12c15 100644
+index 800b3c0..162caa7 100644
 --- a/swift/account/server.py
 +++ b/swift/account/server.py
 @@ -1,4 +1,5 @@
@@ -116,7 +116,25 @@ index 800b3c0..6c12c15 100644
          try:
              prefix = get_param(req, 'prefix')
              delimiter = get_param(req, 'delimiter')
-@@ -298,15 +324,29 @@ class AccountController(object):
+@@ -222,8 +248,15 @@ class AccountController(object):
+         except AssertionError, err:
+             return HTTPBadRequest(body='bad accept header: %s' % req.accept,
+                                   content_type='text/plain', request=req)
+-        account_list = broker.list_containers_iter(limit, marker, end_marker,
+-                                                   prefix, delimiter)
++        if self.fs_object:
++            details = True if out_content_type == 'application/json' \
++                or out_content_type.endswith('/xml') else False
++            account_list = broker.list_containers_iter(limit, marker, end_marker,
++                                                       prefix, delimiter,
++                                                       details)
++        else:
++            account_list = broker.list_containers_iter(limit, marker, end_marker,
++                                                       prefix, delimiter)
+         if out_content_type == 'application/json':
+             json_pattern = ['"name":%s', '"count":%s', '"bytes":%s']
+             json_pattern = '{' + ','.join(json_pattern) + '}'
+@@ -298,15 +331,29 @@ class AccountController(object):
              return HTTPNotFound(request=req)
          timestamp = normalize_timestamp(req.headers['x-timestamp'])
          metadata = {}
@@ -300,7 +318,7 @@ index ddfd42b..1a644dd 100644
                  return
              else:
 diff --git a/swift/container/server.py b/swift/container/server.py
-index 8a18cfd..d6acbba 100644
+index 8a18cfd..36d55ef 100644
 --- a/swift/container/server.py
 +++ b/swift/container/server.py
 @@ -1,4 +1,5 @@
@@ -453,7 +471,25 @@ index 8a18cfd..d6acbba 100644
          try:
              path = get_param(req, 'path')
              prefix = get_param(req, 'prefix')
-@@ -414,10 +451,17 @@ class ContainerController(object):
+@@ -314,8 +351,15 @@ class ContainerController(object):
+         except AssertionError, err:
+             return HTTPBadRequest(body='bad accept header: %s' % req.accept,
+                                   content_type='text/plain', request=req)
+-        container_list = broker.list_objects_iter(limit, marker, end_marker,
+-                                                  prefix, delimiter, path)
++        if self.fs_object:
++            details = True if out_content_type == 'application/json' \
++                or out_content_type.endswith('/xml') else False
++            container_list = broker.list_objects_iter(limit, marker, end_marker,
++                                                      prefix, delimiter, path,
++                                                      details)
++        else:
++            container_list = broker.list_objects_iter(limit, marker, end_marker,
++                                                      prefix, delimiter, path)
+         if out_content_type == 'application/json':
+             json_pattern = ['"name":%s', '"hash":"%s"', '"bytes":%s',
+                             '"content_type":%s, "last_modified":"%s"']
+@@ -414,10 +458,17 @@ class ContainerController(object):
              return HTTPNotFound(request=req)
          timestamp = normalize_timestamp(req.headers['x-timestamp'])
          metadata = {}
@@ -475,7 +511,7 @@ index 8a18cfd..d6acbba 100644
          if metadata:
              if 'X-Container-Sync-To' in metadata:
                  if 'X-Container-Sync-To' not in broker.metadata or \
-@@ -427,8 +471,19 @@ class ContainerController(object):
+@@ -427,8 +478,19 @@ class ContainerController(object):
              broker.update_metadata(metadata)
          return HTTPNoContent(request=req)
  
