@@ -19,7 +19,8 @@ from swift.plugins.utils import clean_metadata, dir_empty, rmdirs, mkdirs, \
      validate_account, validate_container, check_valid_account, is_marker, \
      get_container_details, get_account_details, create_container_metadata, \
      create_account_metadata, DEFAULT_GID, DEFAULT_UID, get_account_details, \
-     validate_object, create_object_metadata, read_metadata, write_metadata
+     validate_object, create_object_metadata, read_metadata, write_metadata, \
+     do_ismount
 
 from swift.common.constraints import CONTAINER_LISTING_LIMIT, \
     check_mount
@@ -181,12 +182,11 @@ class DiskDir(DiskCommon):
     def delete(self):
         if self.empty():
             #For delete account.
-            if os.path.ismount(self.datadir):
+            if do_ismount(self.datadir):
                 clean_metadata(self.datadir)
             else:
                 rmdirs(self.datadir)
             self.dir_exists = False
-
 
     def put_metadata(self, metadata):
         """

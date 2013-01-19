@@ -19,10 +19,9 @@ from tempfile import mkstemp
 from contextlib import contextmanager
 from swift.common.utils import normalize_timestamp, renamer
 from swift.plugins.utils import mkdirs, rmdirs, validate_object, \
-    check_valid_account, create_object_metadata,  do_open, \
+    check_valid_account, create_object_metadata, do_open, do_ismount, \
     do_close, do_unlink, do_chown, do_stat, do_listdir, read_metadata,\
     write_metadata
-from swift.common.constraints import  check_mount
 from swift.plugins.utils import X_CONTENT_TYPE, X_CONTENT_LENGTH, X_TIMESTAMP,\
      X_PUT_TIMESTAMP, X_TYPE, X_ETAG, X_OBJECTS_COUNT, X_BYTES_USED, \
      X_OBJECT_TYPE, FILE, DIR, MARKER_DIR, OBJECT, \
@@ -74,7 +73,7 @@ class Gluster_DiskFile(DiskFile):
         self.datadir = os.path.join(path, device, self.name)
 
         self.device_path = os.path.join(path, device)
-        if not check_mount(path, device):
+        if not do_ismount(self.device_path):
             check_valid_account(account, fs_object)
 
         self.container_path = os.path.join(path, device, container)

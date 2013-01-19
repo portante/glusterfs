@@ -17,24 +17,31 @@ import os, fcntl, time, errno
 from ConfigParser import ConfigParser
 from swift.common.utils import TRUE_VALUES
 from hashlib import md5
-from swift.plugins.utils import mkdirs
+from swift.plugins.utils import mkdirs, do_ismount
+
+_fs_conf = ConfigParser()
+_fs_conf.read(os.path.join('/etc/swift', 'fs.conf'))
+_mount_path = _fs_conf.get('DEFAULT', 'mount_path', '/mnt/gluster-object')
+_auth_account = _fs_conf.get('DEFAULT', 'auth_account', 'auth')
+_mount_ip = _fs_conf.get('DEFAULT', 'mount_ip', 'localhost')
+_remote_cluster = _fs_conf.get('DEFAULT', 'remote_cluster', False) in TRUE_VALUES
+_object_only = _fs_conf.get('DEFAULT', 'object_only', "no") in TRUE_VALUES
+
 
 class Glusterfs(object):
     def __init__(self):
         self.name = 'glusterfs'
-        self.fs_conf = ConfigParser()
-        self.fs_conf.read(os.path.join('/etc/swift', 'fs.conf'))
-        self.mount_path = self.fs_conf.get('DEFAULT', 'mount_path', '/mnt/gluster-object')
-        self.auth_account = self.fs_conf.get('DEFAULT', 'auth_account', 'auth')
-        self.mount_ip = self.fs_conf.get('DEFAULT', 'mount_ip', 'localhost')
-        self.remote_cluster = self.fs_conf.get('DEFAULT', 'remote_cluster', False) in TRUE_VALUES
-        self.object_only = self.fs_conf.get('DEFAULT', 'object_only', "no") in TRUE_VALUES
+        self.mount_path = _mount_path
+        self.auth_account = _auth_account
+        self.mount_ip = _mount_ip
+        self.remote_cluster = _remote_cluster
+        self.object_only = _object_only
 
     def busy_wait(self, mount_path):
         # Iterate for definite number of time over a given
         # interval for successful mount
         for i in range(0, 5):
-            if os.path.ismount(os.path.join(mount_path)):
+            if do_ismount(mount_path):
                 return True
             time.sleep(2)
         logging.error('Mount failed (after timeout) %s: %s' % (self.name, mnt_cmd))

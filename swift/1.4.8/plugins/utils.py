@@ -84,6 +84,44 @@ def strip_obj_storage_path(path, string='/mnt/gluster-object'):
     """
     return path.replace(string, '').strip('/')
 
+def do_ismount(path):
+    """
+    Test whether a path is a mount point.
+
+    This is code hijacked from C Python 2.6.8, adapted to remove the extra
+    lstat() system call.
+    """
+    try:
+        s1 = os.lstat(path)
+    except os.error:
+        # It doesn't exist -- so not a mount point :-)
+        return False
+
+    is_link = (s1.st_mode & 0120000) != 0
+    if is_link:
+        # A symlink can never be a mount point
+        return False
+
+    try:
+        s2 = os.lstat(os.path.join(path, '..'))
+    except os.error:
+        # It doesn't exist -- so not a mount point :-)
+        return False
+
+    dev1 = s1.st_dev
+    dev2 = s2.st_dev
+    if dev1 != dev2:
+        # path/.. on a different device as path
+        return True
+
+    ino1 = s1.st_ino
+    ino2 = s2.st_ino
+    if ino1 == ino2:
+        # path/.. is the same i-node as path
+        return True
+
+    return False
+
 def do_mkdir(path):
     try:
         os.mkdir(path)
@@ -304,7 +342,7 @@ def check_user_xattr(path):
 def _check_valid_account(account, fs_object):
     mount_path = getattr(fs_object, 'mount_path', MOUNT_PATH)
 
-    if os.path.ismount(os.path.join(mount_path, account)):
+    if do_ismount(os.path.join(mount_path, account)):
         return True
 
     if not check_account_exists(fs_object.get_export_from_account_id(account), fs_object):

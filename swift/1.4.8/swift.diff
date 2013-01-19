@@ -167,12 +167,25 @@ index 800b3c0..162caa7 100644
          req = Request(env)
          self.logger.txn_id = req.headers.get('x-trans-id', None)
          if not check_utf8(req.path_info):
+diff --git a/swift/common/constraints.py b/swift/common/constraints.py
+index 235dcca..31cb8c4 100644
+--- a/swift/common/constraints.py
++++ b/swift/common/constraints.py
+@@ -140,7 +140,7 @@ def check_mount(root, drive):
+     if not drive.isalnum():
+         return False
+     path = os.path.join(root, drive)
+-    return os.path.exists(path) and os.path.ismount(path)
++    return os.path.ismount(path)
+ 
+ 
+ def check_float(string):
 diff --git a/swift/common/middleware/gluster.py b/swift/common/middleware/gluster.py
 new file mode 100644
-index 0000000..341285d
+index 0000000..b2cfecc
 --- /dev/null
 +++ b/swift/common/middleware/gluster.py
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,63 @@
 +# Copyright (c) 2011 Red Hat, Inc.
 +#
 +# Licensed under the Apache License, Version 2.0 (the "License");
@@ -188,9 +201,21 @@ index 0000000..341285d
 +# See the License for the specific language governing permissions and
 +# limitations under the License.
 +
++import sys
 +from swift.common.utils import get_logger, plugin_enabled
 +from swift import plugins
 +from ConfigParser import ConfigParser
++
++if plugin_enabled():
++    _fs_conf = ConfigParser()
++    if _fs_conf.read('/etc/swift/fs.conf'):
++        try:
++            _gluster_root = _fs_conf.get ('DEFAULT', 'mount_path')
++        except NoSectionError, NoOptionError:
++            sys.exit(_('ERROR mount_path not present'))
++    else:
++        _gluster_root = ""
++
 +
 +class Gluster_plugin(object):
 +    """
@@ -206,18 +231,14 @@ index 0000000..341285d
 +    def __call__(self, env, start_response):
 +        if not plugin_enabled():
 +            return self.app(env, start_response)
-+        env['Gluster_enabled'] =True
++        env['Gluster_enabled'] = True
 +        fs_object = getattr(plugins, self.fs_name, False)
 +        if not fs_object:
 +            raise Exception('%s plugin not found', self.fs_name)
 +
 +        env['fs_object'] = fs_object()
-+        fs_conf = ConfigParser()
-+        if fs_conf.read('/etc/swift/fs.conf'):
-+            try:
-+                env['root'] = fs_conf.get ('DEFAULT', 'mount_path')
-+            except NoSectionError, NoOptionError:
-+                self.logger.exception(_('ERROR mount_path not present'))
++        if _gluster_root:
++            env['root'] = _gluster_root
 +        return self.app(env, start_response)
 +
 +def filter_factory(global_conf, **local_conf):
@@ -229,7 +250,7 @@ index 0000000..341285d
 +        return Gluster_plugin(app, conf)
 +    return gluster_filter
 diff --git a/swift/common/utils.py b/swift/common/utils.py
-index 47edce8..03701ce 100644
+index 47edce8..8878971 100644
 --- a/swift/common/utils.py
 +++ b/swift/common/utils.py
 @@ -1,4 +1,5 @@
@@ -238,18 +259,24 @@ index 47edce8..03701ce 100644
  #
  # Licensed under the Apache License, Version 2.0 (the "License");
  # you may not use this file except in compliance with the License.
-@@ -1138,3 +1139,11 @@ def streq_const_time(s1, s2):
+@@ -76,6 +77,10 @@ if hash_conf.read('/etc/swift/swift.conf'):
+ # Used when reading config values
+ TRUE_VALUES = set(('true', '1', 'yes', 'on', 't', 'y'))
+ 
++try:
++    _plugin_enabled = hash_conf.get('DEFAULT', 'Enable_plugin', 'no') in TRUE_VALUES
++except NoOptionError, NoSectionError:
++    _plugin_enabled = False
+ 
+ def validate_configuration():
+     if HASH_PATH_SUFFIX == '':
+@@ -1138,3 +1143,6 @@ def streq_const_time(s1, s2):
      for (a, b) in zip(s1, s2):
          result |= ord(a) ^ ord(b)
      return result == 0
 +
 +def plugin_enabled():
-+    swift_conf = ConfigParser()
-+    swift_conf.read(os.path.join('/etc/swift', 'swift.conf'))
-+    try:
-+        return swift_conf.get('DEFAULT', 'Enable_plugin', 'no') in TRUE_VALUES
-+    except NoOptionError, NoSectionError:
-+        return False
++    return _plugin_enabled
 diff --git a/swift/common/wsgi.py b/swift/common/wsgi.py
 index ddfd42b..1a644dd 100644
 --- a/swift/common/wsgi.py
