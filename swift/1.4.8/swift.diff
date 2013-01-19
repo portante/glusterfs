@@ -559,7 +559,7 @@ index 8a18cfd..36d55ef 100644
          self.logger.txn_id = req.headers.get('x-trans-id', None)
          if not check_utf8(req.path_info):
 diff --git a/swift/obj/server.py b/swift/obj/server.py
-index 9cca16b..b3986d9 100644
+index 9cca16b..fbb4b24 100644
 --- a/swift/obj/server.py
 +++ b/swift/obj/server.py
 @@ -1,4 +1,5 @@
@@ -658,6 +658,15 @@ index 9cca16b..b3986d9 100644
                          obj, self.logger, disk_chunk_size=self.disk_chunk_size)
          orig_timestamp = file.metadata.get('X-Timestamp')
          upload_expiration = time.time() + self.max_upload_time
+@@ -556,7 +580,7 @@ class ObjectController(object):
+         upload_size = 0
+         last_sync = 0
+         with file.mkstemp() as (fd, tmppath):
+-            if 'content-length' in request.headers:
++            if not self.fs_object and 'content-length' in request.headers:
+                 fallocate(fd, int(request.headers['content-length']))
+             reader = request.environ['wsgi.input'].read
+             for chunk in iter(lambda: reader(self.network_chunk_size), ''):
 @@ -572,6 +596,7 @@ class ObjectController(object):
                      tpool.execute(os.fdatasync, fd)
                      drop_buffer_cache(fd, last_sync, upload_size - last_sync)
