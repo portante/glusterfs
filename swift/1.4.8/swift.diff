@@ -559,7 +559,7 @@ index 8a18cfd..36d55ef 100644
          self.logger.txn_id = req.headers.get('x-trans-id', None)
          if not check_utf8(req.path_info):
 diff --git a/swift/obj/server.py b/swift/obj/server.py
-index 9cca16b..fbb4b24 100644
+index 9cca16b..be70146 100644
 --- a/swift/obj/server.py
 +++ b/swift/obj/server.py
 @@ -1,4 +1,5 @@
@@ -693,14 +693,14 @@ index 9cca16b..fbb4b24 100644
 +                    'X-Timestamp': request.headers['x-timestamp'],
 +                    'Content-Type': request.headers['content-type'],
 +                    'ETag': etag,
-+                    'Content-Length': str(os.fstat(fd).st_size),
++                    'Content-Length': str(upload_size),
 +                }
 +            else:
 +                metadata = {
 +                    'X-Timestamp': request.headers['x-timestamp'],
 +                    'Content-Type': request.headers['content-type'],
 +                    'ETag': etag,
-+                    'Content-Length': str(os.fstat(fd).st_size),
++                    'Content-Length': str(upload_size),
 +                    X_TYPE: OBJECT,
 +                    X_OBJECT_TYPE: FILE,
 +                }
@@ -762,9 +762,23 @@ index 9cca16b..fbb4b24 100644
                          obj, self.logger, disk_chunk_size=self.disk_chunk_size)
          if 'x-if-delete-at' in request.headers and \
                  int(request.headers['x-if-delete-at']) != \
-@@ -764,8 +806,8 @@ class ObjectController(object):
-                                       container, obj, request.headers, device)
-             file.put(fd, tmppath, metadata, extension='.ts')
+@@ -757,15 +799,16 @@ class ObjectController(object):
+         metadata = {
+             'X-Timestamp': request.headers['X-Timestamp'], 'deleted': True,
+         }
+-        with file.mkstemp() as (fd, tmppath):
+-            old_delete_at = int(file.metadata.get('X-Delete-At') or 0)
+-            if old_delete_at:
+-                self.delete_at_update('DELETE', old_delete_at, account,
+-                                      container, obj, request.headers, device)
+-            file.put(fd, tmppath, metadata, extension='.ts')
++        old_delete_at = int(file.metadata.get('X-Delete-At') or 0)
++        if old_delete_at:
++            self.delete_at_update('DELETE', old_delete_at, account,
++                                  container, obj, request.headers, device)
++        if not self.fs_object:
++            with file.mkstemp() as (fd, tmppath):
++                file.put(fd, tmppath, metadata, extension='.ts')
          file.unlinkold(metadata['X-Timestamp'])
 -        if not orig_timestamp or \
 -                orig_timestamp < request.headers['x-timestamp']:
@@ -773,7 +787,7 @@ index 9cca16b..fbb4b24 100644
              self.container_update('DELETE', account, container, obj,
                  request.headers, {'x-timestamp': metadata['X-Timestamp'],
                  'x-trans-id': request.headers.get('x-trans-id', '-')},
-@@ -797,9 +839,18 @@ class ObjectController(object):
+@@ -797,9 +840,18 @@ class ObjectController(object):
              raise hashes
          return Response(body=pickle.dumps(hashes))
  

@@ -2,14 +2,17 @@
 devices = /srv/1/node
 mount_check = false
 bind_port = 6011
-user = root
-log_facility = LOG_LOCAL2
+workers = 1
 
 [pipeline:main]
 pipeline = gluster container-server
 
 [app:container-server]
 use = egg:swift#container
+user = root
+log_facility = LOG_LOCAL2
+node_timeout = 60
+conn_timeout = 5
 
 [filter:gluster]
 use = egg:swift#gluster

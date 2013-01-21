@@ -17,6 +17,7 @@ import logging
 import os
 import errno
 import xattr
+import stat
 from hashlib import md5
 from swift.common.utils import normalize_timestamp, TRUE_VALUES
 from eventlet import sleep
@@ -97,8 +98,7 @@ def do_ismount(path):
         # It doesn't exist -- so not a mount point :-)
         return False
 
-    is_link = (s1.st_mode & 0120000) != 0
-    if is_link:
+    if stat.S_ISLNK(s1.st_mode):
         # A symlink can never be a mount point
         return False
 
@@ -159,16 +159,13 @@ def do_chown(path, uid, gid):
 
 def do_stat(path):
     try:
-        #Check for fd.
-        if isinstance(path, int):
-            buf = os.fstat(path)
-        else:
-            buf = os.stat(path)
-    except Exception, err:
-        logging.exception("Stat failed on %s err: %s", path, str(err))
-        raise
-
-    return buf
+        stats = os.stat(path)
+    except OSError as err:
+        if err.errno != errno.ENOENT:
+            logging.exception("Stat failed on %s err: %s", path, str(err))
+            raise
+        stats = None
+    return stats
 
 def do_open(path, mode):
     try:
@@ -513,14 +510,9 @@ def get_object_metadata(obj_path):
     """
     Return metadata of object.
     """
-    try:
-        stats = os.stat(obj_path)
-    except OSError as e:
-        if e.errno != errno.ENOENT:
-            raise
-        metadata = {}
-    else:
-        is_dir = (stats.st_mode & 0040000) != 0
+    stats = do_stat(obj_path)
+    if stats:
+        is_dir = stat.S_ISDIR(stats.st_mode)
         metadata = {
             X_TYPE: OBJECT,
             X_TIMESTAMP: normalize_timestamp(stats.st_ctime),
@@ -529,6 +521,8 @@ def get_object_metadata(obj_path):
             X_CONTENT_LENGTH: 0 if is_dir else stats.st_size,
             X_ETAG: md5().hexdigest() if is_dir else get_etag(obj_path),
             }
+    else:
+        metadata = {}
     return metadata
 
 def get_container_metadata(cont_path):
