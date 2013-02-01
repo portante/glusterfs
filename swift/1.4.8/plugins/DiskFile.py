@@ -204,7 +204,7 @@ class Gluster_DiskFile(DiskFile):
         write_metadata(tmppath, metadata)
 
         # Ensure it is properly owned before we make it available.
-        do_chown(tmppath, self.uid, self.gid)
+        do_chown(fd, self.uid, self.gid)
 
         if not self.data_file and self.obj_path \
                 and not os.path.exists(os.path.join(self.container_path, self.obj_path)):

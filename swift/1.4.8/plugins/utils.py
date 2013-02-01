@@ -149,11 +149,14 @@ def do_listdir(path):
         raise
     return buf
 
-def do_chown(path, uid, gid):
+def do_chown(path_or_fd, uid, gid):
     try:
-        os.chown(path, uid, gid)
+        if isinstance(path_or_fd, int):
+            os.fchown(path_or_fd, uid, gid)
+        else:
+            os.chown(path_or_fd, uid, gid)
     except Exception, err:
-        logging.exception("Chown failed on %s err: %s", path, str(err))
+        logging.exception("*chown() failed on %s err: %s", path_or_fd, str(err))
         raise
     return True
 
