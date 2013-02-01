@@ -22,8 +22,8 @@ from contextlib import contextmanager
 from swift.common.exceptions import DiskFileNotExist
 from swift.plugins.utils import mkdirs, rmdirs, validate_object, \
      check_valid_account, create_object_metadata, do_open, do_ismount, \
-     do_close, do_unlink, do_chown, do_stat, do_makedirs, read_metadata, \
-     write_metadata
+     do_close, do_unlink, do_chown, do_stat, read_metadata, write_metadata, \
+     get_object_metadata
 from swift.plugins.utils import X_CONTENT_LENGTH, X_TIMESTAMP, \
      X_TYPE, X_OBJECT_TYPE, MARKER_DIR, DEFAULT_UID, DEFAULT_GID
 
@@ -36,6 +36,56 @@ ASYNCDIR = 'async_pending'
 KEEP_CACHE_SIZE = (5 * 1024 * 1024)
 # keep these lower-case
 DISALLOWED_HEADERS = set('content-length content-type deleted etag'.split())
+
+def make_directory(full_path, uid, gid, metadata=None):
+    """
+    Make a directory and change the owner ship as specified, and potentially
+    creating the object metadata if requested.
+    """
+    try:
+        # Assume the parent directory exists, and attempt the creation.
+        os.mkdir(full_path)
+    except OSError as err:
+        if err.errno == errno.ENOENT:
+            # Tell the caller some path to the parent directory does not
+            # exist.
+            return False
+        elif err.errno == errno.EEXIST:
+            # Possible race, in that the caller invoked this method when it
+            # had previously determined the file did not exist.
+            if not os.path.isdir(full_path):
+                logging.exception("create_dir_object: os.mkdir failed"
+                                  " on path %s because it already"
+                                  " exists but not as a directory"
+                                  " (err: %s)",
+                                  full_path, err.strerror)
+                # FIXME: Ideally we'd want to return an appropriate error
+                # message and code in the PUT Object REST API response.
+                raise
+            return True
+        elif err.errno == errno.ENOTDIR:
+            logging.exception("create_dir_object: os.mkdir failed"
+                              " because some part of path %s is"
+                              " not in fact a directory (err: %s)",
+                              full_path, err.strerror)
+            # FIXME: Ideally we'd want to return an appropriate error
+            # message and code in the PUT Object REST API response.
+            raise
+        else:
+            # Some other potentially rare exception occurred that does not
+            # currently warrant a special log entry to help diagnose.
+            raise
+    else:
+        if metadata:
+            # We were asked to set the initial metadata for this object.
+            metadata_orig = get_object_metadata(full_path)
+            metadata_orig.update(metadata)
+            write_metadata(full_path, metadata)
+
+        # We created it, so we are reponsible for always setting the proper
+        # ownership.
+        do_chown(full_path, uid, gid)
+        return True
 
 
 class Gluster_DiskFile(DiskFile):
@@ -138,18 +188,60 @@ class Gluster_DiskFile(DiskFile):
         """
         return not self.data_file
 
-    def create_dir_object(self, dir_path):
-        try:
-            os.mkdir(dir_path)
-        except OSError as err:
-            if err.errno != errno.EEXIST:
-                logging.exception("create_dir_object: os.mkdir failed on %s with err: %s",
-                                  dir_path, err.strerror)
-                raise
-            # Directory aleady exists, just override metadata below.
-        else:
-            do_chown(dir_path, self.uid, self.gid)
-        create_object_metadata(dir_path)
+    def create_dir_object(self, dir_path, metadata=None):
+        """
+        Create a directory object at the specified path. No check is made to
+        see if the directory object already exists, that is left to the
+        caller (this avoids a potentially duplicate stat() system call).
+
+        The "dir_path" must be relative to its container, self.container_path.
+
+        The "metadata" object is an optional set of metadata to apply to the
+        newly created directory object. If not present, no initial metadata is
+        applied.
+
+        The algorithm used is as follows:
+
+          1. An attempt is made to create the directory, assuming the parent
+             directory already exists
+
+             * Directory creation races are detected, returning success in
+               those cases
+
+          2. If the directory creation fails because some part of the path to
+             the directory does not exist, then a search back up the path is
+             performed to find the first existing ancestor directory, and then
+             the missing parents are successively created, finally creating
+             the target directory
+        """
+        full_path = os.path.join(self.container_path, dir_path)
+        cur_path = full_path
+        stack = []
+        while True:
+            md = None if cur_path != full_path else metadata
+            if make_directory(cur_path, self.uid, self.gid, md):
+                break
+            # Some path of the parent did not exist, so loop around and
+            # create that, pushing this parent on the stack.
+            if os.path.sep not in cur_path:
+                self.logger.error("Failed to create directory path while"
+                                  " exhausting path elements to create: %s",
+                                  full_path)
+                raise Exception()
+            cur_path, child = cur_path.rsplit(os.path.sep, 1)
+            assert child
+            stack.append(child)
+
+        child = stack.pop() if stack else None
+        while child:
+            cur_path = os.path.join(cur_path, child)
+            md = None if cur_path != full_path else metadata
+            if not make_directory(cur_path, self.uid, self.gid, md):
+                self.logger.error("Failed to create directory path to"
+                                  " target, %s, on subpath: %s",
+                                  full_path, cur_path)
+                raise Exception()
+            child = stack.pop() if stack else None
         return True
 
     def put_metadata(self, metadata):
@@ -158,8 +250,8 @@ class Gluster_DiskFile(DiskFile):
 
     def put(self, fd, tmppath, metadata, extension=''):
         """
-        Finalize writing the file on disk, and renames it from the temp file to
-        the real location.  This should be called after the data has been
+        Finalize writing the file on disk, and renames it from the temp file
+        to the real location.  This should be called after the data has been
         written to the temp file.
 
         :params fd: file descriptor of the temp file
@@ -169,38 +261,37 @@ class Gluster_DiskFile(DiskFile):
         """
         #Marker dir.
         if extension == '.ts':
-            return True
+            return
         if extension == '.meta':
             self.put_metadata(metadata)
-            return True
+            return
 
         if metadata[X_OBJECT_TYPE] == MARKER_DIR:
             if not self.data_file:
                 # Does not exist, create it
-                data_file = os.path.join(self.datadir, self.obj)
-                self.create_dir_object(data_file)
-                self.data_file = data_file
+                data_file = os.path.join(self.obj_path, self.obj)
+                self.create_dir_object(data_file, metadata)
+                self.data_file = os.path.join(self.container_path, data_file)
             elif not self.is_dir:
                 # Exists, but as a file
-                self.logger.error('Directory creation failed since a file already exists: %s' % \
-                                  self.data_file)
-                return False
-            # Existing or created directory, add the metadata to it
-            self.put_metadata(metadata)
-            return True
+                self.logger.error('Directory creation failed since a file'
+                                  ' already exists: %s' % self.data_file)
+                raise Exception()
+            return
 
         # Check if directory already exists and we are trying to put a regular
         # file
         if self.is_dir:
-            self.logger.error('File creation failed since directory already exists %s' % \
-                              self.data_file)
-            return False
+            self.logger.error('File creation failed since directory already'
+                              ' exists %s' % self.data_file)
+            raise Exception()
 
         if X_CONTENT_LENGTH in metadata:
             self.drop_cache(fd, 0, int(metadata[X_CONTENT_LENGTH]))
 
         tpool.execute(os.fsync, fd)
 
+        # FIXME: Should use fd instead of path to avoid extra lookup
         write_metadata(tmppath, metadata)
 
         # Ensure it is properly owned before we make it available.
@@ -208,28 +299,14 @@ class Gluster_DiskFile(DiskFile):
 
         if not self.data_file and self.obj_path \
                 and not os.path.exists(os.path.join(self.container_path, self.obj_path)):
-            # File does not already exist, and it has a path that
-            # needs to be created (perhaps parts of it).
-            dir_objs = self.obj_path.split(os.path.sep)
-            tmp_path = ''
-            if len(dir_objs):
-                for dir_name in dir_objs:
-                    if tmp_path:
-                        tmp_path = os.path.join(tmp_path, dir_name)
-                    else:
-                        tmp_path = dir_name
-                    if not self.create_dir_object(os.path.join(self.container_path,
-                            tmp_path)):
-                        self.logger.error("Failed object path creation in subdir %s",
-                                          os.path.join(self.container_path, tmp_path))
-                        return False
+            self.create_dir_object(self.obj_path)
 
         # At this point we know that the object's full directory path exists,
         # so we can just rename it directly without using Swift's
         # swift.common.utils.renamer(), which makes the directory path and
         # adds extra stat() calls.
         data_file = os.path.join(self.datadir, self.obj)
-        os.rename(tmppath, os.path.join(data_file))
+        os.rename(tmppath, data_file)
 
         # Avoid the unlink() system call as part of the mkstemp context cleanup
         self.tmppath = None
@@ -238,7 +315,6 @@ class Gluster_DiskFile(DiskFile):
 
         # Mark that is actually exists
         self.data_file = data_file
-        return True
 
     def unlinkold(self, timestamp):
         """
