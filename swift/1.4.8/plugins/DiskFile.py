@@ -203,6 +203,9 @@ class Gluster_DiskFile(DiskFile):
 
         write_metadata(tmppath, metadata)
 
+        # Ensure it is properly owned before we make it available.
+        do_chown(tmppath, self.uid, self.gid)
+
         if not self.data_file and self.obj_path \
                 and not os.path.exists(os.path.join(self.container_path, self.obj_path)):
             # File does not already exist, and it has a path that
@@ -231,8 +234,6 @@ class Gluster_DiskFile(DiskFile):
         # Avoid the unlink() system call as part of the mkstemp context cleanup
         self.tmppath = None
 
-        # Ensure it is properly owned
-        do_chown(data_file, self.uid, self.gid)
         self.metadata = metadata
 
         # Mark that is actually exists
