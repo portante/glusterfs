@@ -15,8 +15,9 @@
 
 import os
 import stat
+import fcntl
 import errno
-from eventlet import tpool
+from eventlet import tpool, sleep
 from tempfile import mkstemp
 from contextlib import contextmanager
 from swift.common.exceptions import DiskFileNotExist
@@ -37,55 +38,112 @@ KEEP_CACHE_SIZE = (5 * 1024 * 1024)
 # keep these lower-case
 DISALLOWED_HEADERS = set('content-length content-type deleted etag'.split())
 
+def lock_parent(full_path):
+    parent_path, _ = full_path.rsplit(os.path.sep, 1)
+    try:
+        fd = os.open(parent_path, os.O_RDONLY)
+    except OSError as err:
+        if err.errno == errno.ENOENT:
+            # Cannot lock the parent because it does not exist, let the caller
+            # handle this situation.
+            return False
+        raise
+    else:
+        while True:
+            # Spin sleeping for 1/10th of a second until we get the lock.
+            # FIXME: Consider adding a final timeout just abort the operation.
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except IOError as err:
+                if err.errno == errno.EAGAIN:
+                    sleep(0.1)
+                else:
+                    # Don't leak an open file on an exception
+                    os.close(fd)
+                    raise
+            except Exception:
+                # Don't leak an open file for any other exception
+                os.close(fd)
+                raise
+            else:
+                break
+        return fd
+
 def make_directory(full_path, uid, gid, metadata=None):
     """
     Make a directory and change the owner ship as specified, and potentially
     creating the object metadata if requested.
     """
+    fd = lock_parent(full_path)
+    if fd is False:
+        # Parent does exist either, pass this situation on to the caller to
+        # handle.
+        return False
     try:
-        # Assume the parent directory exists, and attempt the creation.
-        os.mkdir(full_path)
-    except OSError as err:
-        if err.errno == errno.ENOENT:
-            # Tell the caller some path to the parent directory does not
-            # exist.
-            return False
-        elif err.errno == errno.EEXIST:
-            # Possible race, in that the caller invoked this method when it
-            # had previously determined the file did not exist.
-            if not os.path.isdir(full_path):
+        # Check for directory existence
+        stats = do_stat(full_path)
+        if stats:
+            # It now exists, verify it is a directory
+            is_dir = stat.S_ISDIR(stats.st_mode)
+            if not is_dir:
+                # It is not a directory, log an error
+                logging.error("create_dir_object: non-directory found at"
+                              " path %s when expecting a directory",
+                              full_path)
+                raise Exception()
+            return True
+
+        try:
+            # We know the parent directory exists, attempt the creation.
+            os.mkdir(full_path)
+        except OSError as err:
+            if err.errno == errno.ENOENT:
+                # Tell the caller some path to the parent directory does not
+                # exist.
+                return False
+            elif err.errno == errno.EEXIST:
+                # Possible race, in that the caller invoked this method when it
+                # had previously determined the file did not exist.
+                if not os.path.isdir(full_path):
+                    logging.exception("create_dir_object: os.mkdir failed"
+                                      " on path %s because it already"
+                                      " exists but not as a directory"
+                                      " (err: %s)",
+                                      full_path, err.strerror)
+                    # FIXME: Ideally we'd want to return an appropriate error
+                    # message and code in the PUT Object REST API response.
+                    raise Exception()
+                return True
+            elif err.errno == errno.ENOTDIR:
                 logging.exception("create_dir_object: os.mkdir failed"
-                                  " on path %s because it already"
-                                  " exists but not as a directory"
-                                  " (err: %s)",
+                                  " because some part of path %s is"
+                                  " not in fact a directory (err: %s)",
                                   full_path, err.strerror)
                 # FIXME: Ideally we'd want to return an appropriate error
                 # message and code in the PUT Object REST API response.
-                raise
-            return True
-        elif err.errno == errno.ENOTDIR:
-            logging.exception("create_dir_object: os.mkdir failed"
-                              " because some part of path %s is"
-                              " not in fact a directory (err: %s)",
-                              full_path, err.strerror)
-            # FIXME: Ideally we'd want to return an appropriate error
-            # message and code in the PUT Object REST API response.
-            raise
+                raise Exception()
+            else:
+                # Some other potentially rare exception occurred that does not
+                # currently warrant a special log entry to help diagnose.
+                raise Exception()
         else:
-            # Some other potentially rare exception occurred that does not
-            # currently warrant a special log entry to help diagnose.
-            raise
-    else:
-        if metadata:
-            # We were asked to set the initial metadata for this object.
-            metadata_orig = get_object_metadata(full_path)
-            metadata_orig.update(metadata)
-            write_metadata(full_path, metadata)
+            if metadata:
+                # We were asked to set the initial metadata for this object.
+                metadata_orig = get_object_metadata(full_path)
+                metadata_orig.update(metadata)
+                write_metadata(full_path, metadata)
 
-        # We created it, so we are reponsible for always setting the proper
-        # ownership.
-        do_chown(full_path, uid, gid)
-        return True
+            # We created it, so we are reponsible for always setting the proper
+            # ownership.
+            do_chown(full_path, uid, gid)
+            return True
+    finally:
+        # We're done here, be sure to remove our lock and close our open FD.
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except:
+            pass
+        os.close(fd)
 
 
 class Gluster_DiskFile(DiskFile):
