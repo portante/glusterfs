@@ -1,10 +1,27 @@
 [DEFAULT]
+#
+# Path on local file system underwhich GlusterFS mount point shall
+# be made.
 mount_path = /mnt/gluster-object
-auth_account = auth
-#ip of the fs server.
+#
+# IP address of a node in the GlusterFS server cluster hosting the
+# volumes to be served via Swift API.
 mount_ip = localhost
-#fs server need not be local, remote server can also be used,
-#set remote_cluster=yes for using remote server.
+#
+# GluserFS server need not be local, remote server can also be used
+# by setting "remote_cluster = yes".
 remote_cluster = no
+#
+# Attempt to take advantage of the fact that only Swift API accesses
+# will be made to the associated Gluster volumes.
 object_only = no
+#
+# Don't attempt to report accurate object sizes, or for that matter,
+# accurate object counts, in account or container listings. This is
+# a huge perform boost leaving this off (at the expense of the API
+# semantics).
 accurate_size_in_listing = off
+#
+# It is possible to get better performance by allowing each object
+# server worker to use a unique mount point.
+allow_mount_per_server = off

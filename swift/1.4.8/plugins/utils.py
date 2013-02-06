@@ -36,7 +36,6 @@ X_CONTAINER_COUNT = 'X-Container-Count'
 X_OBJECT_TYPE = 'X-Object-Type'
 DIR_TYPE = 'application/directory'
 ACCOUNT = 'Account'
-MOUNT_PATH = '/mnt/gluster-object'
 METADATA_KEY = 'user.swift.metadata'
 MAX_XATTR_SIZE = 254
 CONTAINER = 'container'
@@ -53,8 +52,13 @@ PICKLE_PROTOCOL = 2
 CHUNK_SIZE = 65536
 
 _fs_conf = ConfigParser()
-_fs_conf.read(os.path.join('/etc/swift', 'fs.conf'))
-_do_getsize = _fs_conf.get('DEFAULT', 'accurate_size_in_listing', "no") in TRUE_VALUES
+if _fs_conf.read(os.path.join('/etc/swift', 'fs.conf')):
+    try:
+        _do_getsize = _fs_conf.get('DEFAULT', 'accurate_size_in_listing', "no") in TRUE_VALUES
+    except (NoSectionError, NoOptionError):
+        _do_getsize = False
+else:
+    _do_getsize = False
 
 def mkdirs(path):
     """
@@ -319,11 +323,6 @@ def dir_empty(path):
         if not os.path.exists(path):
             return True
 
-def get_device_from_account(account):
-    if account.startswith(RESELLER_PREFIX):
-        device = account.replace(RESELLER_PREFIX, '', 1)
-        return device
-
 def check_user_xattr(path):
     if not os.path.exists(path):
         return False
@@ -338,28 +337,6 @@ def check_user_xattr(path):
         logging.exception("check_user_xattr: remove failed on %s err: %s", path, str(err))
         #Remove xattr may fail in case of concurrent remove.
     return True
-
-def _check_valid_account(account, fs_object):
-    mount_path = getattr(fs_object, 'mount_path', MOUNT_PATH)
-
-    if do_ismount(os.path.join(mount_path, account)):
-        return True
-
-    if not check_account_exists(fs_object.get_export_from_account_id(account), fs_object):
-        logging.error('Account not present %s', account)
-        return False
-
-    if not os.path.isdir(os.path.join(mount_path, account)):
-        mkdirs(os.path.join(mount_path, account))
-
-    if fs_object:
-        if not fs_object.mount(account):
-            return False
-
-    return True
-
-def check_valid_account(account, fs_object):
-    return _check_valid_account(account, fs_object)
 
 def validate_container(metadata):
     if not metadata:
@@ -574,19 +551,3 @@ def create_container_metadata(cont_path):
 def create_account_metadata(acc_path):
     metadata = get_account_metadata(acc_path)
     return restore_metadata(acc_path, metadata)
-
-def check_account_exists(account, fs_object):
-    if account not in get_account_list(fs_object):
-        logging.error('Account not exists %s' % account)
-        return False
-    else:
-        return True
-
-def get_account_list(fs_object):
-    account_list = []
-    if fs_object:
-        account_list = fs_object.get_export_list()
-    return account_list
-
-def get_account_id(account):
-    return RESELLER_PREFIX + md5(account + HASH_PATH_SUFFIX).hexdigest()

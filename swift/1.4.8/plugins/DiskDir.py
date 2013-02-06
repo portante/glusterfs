@@ -16,20 +16,15 @@
 import os
 
 from swift.plugins.utils import clean_metadata, dir_empty, rmdirs, mkdirs, \
-     validate_account, validate_container, check_valid_account, is_marker, \
+     validate_account, validate_container, create_account_metadata, do_ismount,\
      get_container_details, get_account_details, create_container_metadata, \
-     create_account_metadata, DEFAULT_GID, DEFAULT_UID, get_account_details, \
-     validate_object, create_object_metadata, read_metadata, write_metadata, \
-     do_ismount
-
-from swift.common.constraints import CONTAINER_LISTING_LIMIT, \
-    check_mount
+     DEFAULT_GID, DEFAULT_UID, validate_object, create_object_metadata, \
+     read_metadata, write_metadata
 
 from swift.plugins.utils import X_CONTENT_TYPE, X_CONTENT_LENGTH, X_TIMESTAMP,\
-     X_PUT_TIMESTAMP, X_TYPE, X_ETAG, X_OBJECTS_COUNT, X_BYTES_USED, \
-     X_CONTAINER_COUNT, CONTAINER
+     X_PUT_TIMESTAMP, X_ETAG, X_OBJECTS_COUNT, X_BYTES_USED, \
+     X_CONTAINER_COUNT
 
-from swift import plugins
 def strip_obj_storage_path(path, string='/mnt/gluster-object'):
     """
     strip /mnt/gluster-object
@@ -79,7 +74,6 @@ class DiskCommon(object):
         Accept sorted list.
         """
         filtered_objs=[]
-        found = 0
         if objects[-1] < marker:
             return filtered_objs
         for object_name in objects:
@@ -130,19 +124,19 @@ class DiskDir(DiskCommon):
     def __init__(self, path, device, partition, account, container, logger,
                  uid=DEFAULT_UID, gid=DEFAULT_GID, fs_object=None):
         self.root = path
-        device = account
+        device = fs_object.convert_account_to_device(account)
         if container:
             self.name = container
         else:
             self.name = None
-        if self.name:
-            self.datadir = os.path.join(path, account, self.name)
-        else:
-            self.datadir = os.path.join(path, device)
-        self.account = account
         self.device_path = os.path.join(path, device)
-        if not check_mount(path, device):
-            check_valid_account(account, fs_object)
+        if self.name:
+            self.datadir = os.path.join(self.device_path, self.name)
+        else:
+            self.datadir = self.device_path
+        self.account = account
+        if not do_ismount(self.device_path):
+            fs_object.mount_via_account(path, account)
         self.logger = logger
         self.metadata = {}
         self.uid = int(uid)
@@ -399,9 +393,11 @@ class DiskAccount(DiskDir):
     def __init__(self, root, account, fs_object = None):
         self.root = root
         self.account = account
-        self.datadir = os.path.join(self.root, self.account)
-        if not check_mount(root, account):
-            check_valid_account(account, fs_object)
+        self.device = fs_object.convert_account_to_device(account)
+        self.device_path = os.path.join(self.root, self.device)
+        self.datadir = self.device_path
+        if not do_ismount(self.device_path):
+            fs_object.mount_via_account(root, account)
         self.metadata = read_metadata(self.datadir)
         if not self.metadata or not validate_account(self.metadata):
             self.metadata = create_account_metadata(self.datadir)

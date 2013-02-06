@@ -21,8 +21,8 @@ from tempfile import mkstemp
 from contextlib import contextmanager
 from swift.common.exceptions import DiskFileNotExist
 from swift.plugins.utils import mkdirs, rmdirs, validate_object, \
-     check_valid_account, create_object_metadata, do_open, do_ismount, \
-     do_close, do_unlink, do_chown, do_stat, read_metadata, write_metadata, \
+     create_object_metadata, do_open, do_ismount, do_close, do_unlink, \
+     do_chown, do_stat, read_metadata, write_metadata, \
      get_object_metadata
 from swift.plugins.utils import X_CONTENT_LENGTH, X_TIMESTAMP, \
      X_TYPE, X_OBJECT_TYPE, MARKER_DIR, DEFAULT_UID, DEFAULT_GID
@@ -109,9 +109,9 @@ class Gluster_DiskFile(DiskFile):
 
     def __init__(self, path, device, partition, account, container, obj,
                  logger, keep_data_fp=False, disk_chunk_size=65536,
-                 uid=DEFAULT_UID, gid=DEFAULT_GID, fs_object = None):
+                 uid=DEFAULT_UID, gid=DEFAULT_GID, fs_object=None):
         self.disk_chunk_size = disk_chunk_size
-        device = account
+        device = fs_object.convert_account_to_device(account, unique=True)
         #Don't support obj_name ending/begining with '/', like /a, a/, /a/b/ etc
         obj = obj.strip('/')
         if '/' in obj:
@@ -124,15 +124,15 @@ class Gluster_DiskFile(DiskFile):
             self.name = os.path.join(container, self.obj_path)
         else:
             self.name = container
-        #Absolute path for obj directory.
-        self.datadir = os.path.join(path, device, self.name)
-
         self.device_path = os.path.join(path, device)
-        if not do_ismount(self.device_path):
-            check_valid_account(account, fs_object)
+        #Absolute path for obj directory.
+        self.datadir = os.path.join(self.device_path, self.name)
 
-        self.container_path = os.path.join(path, device, container)
-        self.tmpdir = os.path.join(path, device, 'tmp')
+        if not do_ismount(self.device_path):
+            fs_object.mount_via_account(path, account, unique=True)
+
+        self.container_path = os.path.join(self.device_path, container)
+        self.tmpdir = os.path.join(self.device_path, 'tmp')
         self.logger = logger
         self.metadata = {}
         self.meta_file = None
